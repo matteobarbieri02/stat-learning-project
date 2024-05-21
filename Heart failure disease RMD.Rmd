@@ -1,0 +1,889 @@
+---
+title: "Statistical learning project"
+author: "Barbieri, Romanelli, Spaziani"
+date: "2024-03-23"
+output:
+  pdf_document: default
+  word_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Heart Failure Clinical Records
+
+## Dataset overview
+
+Cardiovascular diseases (CVDs) are the number 1 cause of death globally, taking an estimated 17.9 million lives each year, which accounts for 31% of all deaths worldwide. Heart failure is a common event caused by Cardiovascular diseases and this dataset contains 12 features that can be used to predict mortality by heart failure.
+
+Most cardiovascular diseases can be prevented by addressing behavioural risk factors such as tobacco use, unhealthy diet and obesity, physical inactivity and harmful use of alcohol using population-wide strategies.
+
+People with cardiovascular disease or who are at high cardiovascular risk (due to the presence of one or more risk factors such as hypertension, diabetes, hyperlipidaemia or already established disease) need early detection and management wherein a machine learning model can be of great help.
+
+## Goal of our project and stakeholders
+
+We have been commissioned by the San Raffaele Hospital in Milan to conduct an analysis on heart failure. The aim of this project is to perform an accurate statistical investigation taking into consideration several variables (both continuous and categorical) that may play a significant role in the arise, development, and management of heart failure. This analysis aims to identify key factors influencing this condition and provide insights that may be beneficial in improving the understanding and therapeutic approach towards patients with heart failure at San Raffaele Hospital.
+
+## Variables description
+
+We have 13 variables one of which is our target variable:
+
+-   **Age**: age of the patient (years)
+-   **Anaemia**: decrease of red blood cells or hemoglobin (boolean)
+-   **Creatinine phosphokinase (CPK)**: level of the CPK enzyme in the blood (mcg/L)
+-   **Diabetes**: if the patient has diabetes (boolean)
+-   **Ejection fraction**: percentage of blood leaving the heart at each contraction (percentage)
+-   **High blood pressure**: if the patient has hypertension (boolean)
+-   **Platelets**: platelets in the blood (kiloplatelets/mL)
+-   **Sex**: woman or man (binary)
+-   **Serum creatinine**: level of serum creatinine in the blood (mg/dL)
+-   **Serum sodium**: level of serum sodium in the blood (mEq/L)
+-   **Smoking**: if the patient smokes or not (boolean)
+-   **Time**: follow-up period (days)
+-   **Death_event**: if the patient died during the follow-up period (boolean) [target variable]
+
+## Source link
+
+-   UCI machine ML repository: <https://archive.ics.uci.edu/dataset/519/heart+failure+clinical+records>
+
+-   A detailed description of the dataset can be found in the Dataset section of the following paper: Davide Chicco, Giuseppe Jurman: "Machine learning can predict survival of patients with heart failure from serum creatinine and ejection fraction alone". BMC Medical Informatics and Decision Making 20, 16 (2020). <https://doi.org/10.1186/s12911-020-1023-5>
+
+## Libraries Loading
+
+```{r, echo=FALSE}
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+library(corrplot)
+library(leaps)
+library(mclust)
+library(ROCR)
+library(tree)
+library(gam)
+library(gbm)
+library(randomForest)
+library(ISLR)
+library(glmnet)
+```
+
+## Showing the dataset
+
+We imported the dataset. Since all variables were incorrectly stored as integers, we transformed the appropriate variables into factors as indicated by the reference dataset. Additionally, we converted the $age$ variable from float to integer.
+
+```{r}
+heart = read.csv("/Users/francescaromanelli/Desktop/UNICATT/Materie/Anno_II/trimestre2/STATISTICAL LEARNING/Project/heart_failure_clinical_records_dataset.csv", sep = ",", header = TRUE)
+heart1 <- heart
+
+heart$age = as.integer(heart$age)
+heart$anaemia = as.factor(heart$anaemia)
+heart$diabetes = as.factor(heart$diabetes)
+heart$high_blood_pressure = as.factor(heart$high_blood_pressure)
+heart$sex = as.factor(heart$sex)
+heart$smoking = as.factor(heart$smoking)
+heart$DEATH_EVENT = as.factor(heart$DEATH_EVENT)
+heart <- rename(heart, death = DEATH_EVENT)
+heart1 <- rename(heart1, death = DEATH_EVENT)
+head(heart)
+```
+
+```{r}
+str(heart)
+```
+
+## Checking for missing values
+
+Let's perform a check on the dataset to see if there are any NA values.
+
+```{r}
+any(is.na(heart))
+```
+
+there are no NaN values present in the dataset.
+
+## Exploratory analysis
+
+In this section, we will perform an exploratory analysis where we visualize the distribution of our variables and explore how they interact with each other and with our response variable $death$. Through visualization techniques and statistical exploration, we aim to gain insights into the relationships between variables and their impact on the outcome of interest.
+
+### Comparison between Deaths and Survivals
+
+```{r}
+survival_count <- sum(heart$death == '0')
+death_count <- sum(heart$death == '1')
+
+# Create a data frame for the bar plot
+plot_data <- data.frame(Status = c("Survivals", "Deaths"),
+                        Count = c(survival_count, death_count))
+
+# Create the bar plot using ggplot2
+ggplot(plot_data, aes(x = Status, y = Count, fill = Status)) +
+  geom_bar(stat = "identity", width = 0.5, color = "black") +
+  geom_text(aes(label = Count), vjust = -0.5, color = "black", size = 4) +
+  scale_fill_manual(values = c("skyblue", "salmon")) +
+  labs(x = "Status", y = "Count", title = "Count of Survivals vs Deaths") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+From the bar chart, it's evident that the number of survival cases significantly outweighs the number of deaths, with the former being roughly twice the latter. This highlights an imbalance between the two labels.
+
+### Age distribution
+
+We represent the variable $age$ using a histogram to visualize the data distribution. Subsequently, we provide a summary to analyze its characteristics.
+
+```{r}
+hist(heart$age, breaks=seq(40,100,5), col="orangered", main="Age Distribution", xlab="Age", ylab="Frequency", xlim=c(40,100), ylim=c(0,60))
+```
+
+```{r}
+summary(heart$age)
+```
+
+The $age$ distribution demonstrates a skewed pattern, with the age variable ranging from a minimum of 40 to a maximum of 95. The highest frequency of occurrences is observed between the ages of 55 and 65
+
+Let's proceed with visualizing the density plot of $age$ based on the two labels, survivals and deaths.
+
+```{r}
+ggplot(heart) +
+  geom_density(aes(age, fill = death), alpha = 0.4) +
+  scale_fill_manual(values = c("red", "blue")) +
+  geom_vline(xintercept = 68.8, color = "red", linetype = "solid") +  
+  labs(x = "Age", y = "Density", title = "Density Plot with Vertical Line at x= 68")
+```
+
+It's interesting to note that until age 68 in our dataset prevails the probability of survive rather than dying. Subsequently, after the age of 68, it appears that the probability of death is considerably higher.
+
+### Comparison between Categorical Variables and Death
+
+We explored the behavior of categorical variables in the dataset concerning the response variable $death$. Utilizing bar plot visualization, we analyzed the distribution of categories for $anaemia$, $smoking$, $sex$, $diabetes$, and $high_blood_pressure$ concerning the presence or absence of death in the dataset.
+
+```{r}
+my_colors <- c("blue", "red")
+
+anaemia_plot <- ggplot(heart, aes(x = factor(anaemia), fill = factor(death))) +
+  geom_bar(position = "dodge", alpha = 0.8) + 
+  scale_fill_manual(values = my_colors, name = "death") +
+  labs(x = "anaemia", y = "count") +
+  ggtitle("anaemia") +  
+  theme_minimal() +
+  theme(legend.position = "right",
+        plot.title = element_text(hjust = 0.5, size = 12),  
+        axis.text = element_text(size = 10),  
+        axis.title = element_text(size = 10))  
+
+smoking_plot <- ggplot(heart, aes(x = factor(smoking), fill = factor(death))) +
+  geom_bar(position = "dodge", alpha = 0.8) + 
+  scale_fill_manual(values = my_colors, name = "death") +
+  labs(x = "smoking", y = "count") +
+  ggtitle("smoking") +  
+  theme_minimal() +
+  theme(legend.position = "right",
+        plot.title = element_text(hjust = 0.5, size = 12),  
+        axis.text = element_text(size = 10),  
+        axis.title = element_text(size = 10))  
+
+sex_plot <- ggplot(heart, aes(x = factor(sex), fill = factor(death))) +
+  geom_bar(position = "dodge", alpha = 0.8) + 
+  scale_fill_manual(values = my_colors, name = "death") +
+  labs(x = "sex", y = "count") +
+  ggtitle("sex") +  
+  scale_x_discrete(labels = c("0" = "female", "1" = "male")) +  
+  theme_minimal() +
+  theme(legend.position = "right",
+        plot.title = element_text(hjust = 0.5, size = 12),  
+        axis.text = element_text(size = 10),  
+        axis.title = element_text(size = 10))  
+
+diabetes_plot <- ggplot(heart, aes(x = factor(diabetes), fill = factor(death))) +
+  geom_bar(position = "dodge", alpha = 0.8) + 
+  scale_fill_manual(values = my_colors, name = "death") +
+  labs(x = "diabetes", y = "count") +
+  ggtitle("diabetes") +  
+  theme_minimal() +
+  theme(legend.position = "right",
+        plot.title = element_text(hjust = 0.5, size = 12),  
+        axis.text = element_text(size = 10),  
+        axis.title = element_text(size = 10))  
+
+
+high_blood_pressure_plot <- ggplot(heart, aes(x = factor(high_blood_pressure), fill = factor(death))) +
+  geom_bar(position = "dodge", alpha = 0.8) + 
+  scale_fill_manual(values = my_colors, name = "death") +
+  labs(x = "high blood pressure", y = "count") +
+  ggtitle("high blood pressure") +  
+  theme_minimal() +
+  theme(legend.position = "right",
+        plot.title = element_text(hjust = 0.5, size = 12),  
+        axis.text = element_text(size = 10),  
+        axis.title = element_text(size = 10))  
+
+grid.arrange(anaemia_plot, smoking_plot, sex_plot, diabetes_plot, 
+             high_blood_pressure_plot, nrow=2)
+```
+
+We can observe that the categorical variables that have quite an impact on the response are $anaemia$and $high_blood_pressure$. From a quick analysis seems that the percentage of people with "anememia" that died is higher that the percentage of patient that survived having "anemia". (taking into account that our classes are unbalanced)
+Same reasoning for high blood pressure. So, it seems that "anemia" and "high blood pressure" can be significative.
+
+-   In the case of "anaemia", when absent, the death rate is approximately 30%, while when present, it increases to about 37%.
+
+-   Regarding "high_blood_pressure", in its absence, the death rate is around 28%, but if present, it rises to approximately 36%.
+
+### Correlation between variables
+
+Now, considering all the variables in our dataset, we want to check whether there is multi-collinearity among our variables.
+
+```{r}
+covariates = heart[,-c(2,4,6,10,11,13)]
+corrplot(cor(covariates), method = "color", addCoef.col = "black", number.cex = 0.4, type = "upper")
+```
+
+From the correlation plot, we can conclude that there are no issues of multicollinearity between variables becuase all the correlation appear to be very low.
+
+### Comparison between Numerical Variables and Death
+
+To explore the association between the numerical variables in our dataset and the occurrence of death, we conducted a comparative analysis using interactive boxplot graphs. This approach allows us to visually display the distribution of numerical variable values in relation to the presence or absence of death.
+
+```{r eval=FALSE, include=FALSE}
+library(plotly)
+y_variables <- c("creatinine_phosphokinase", "ejection_fraction", "platelets", "serum_creatinine", "serum_sodium","time")
+
+plot_list <- list()
+
+for (variable in y_variables) {
+  # Crea il box plot interattivo per la variabile corrente
+  p <- ggplot(heart, aes_string(x = "death", y = variable, fill = "death")) +
+    geom_boxplot(alpha = 0.5) +
+    labs(x = "Death Event", y = variable) +
+    theme_minimal()
+  
+
+  plot_list[[variable]] <- ggplotly(p)
+}
+
+plot_list
+```
+
+```{r}
+pairs(covariates)
+```
+
+## Clustering analysis
+
+### Hierarchical clustering
+
+```{r}
+str(heart)
+```
+
+```{r}
+# take only numerical variables
+
+covariates = heart[,-c(2,4,6,10,11,13)]
+names(covariates)
+```
+
+If variables have different units of measurements we scale -\> `scale()` . Here, we scale the data since units of measurement are different.
+
+```{r}
+std.covariates = scale(covariates)
+```
+
+We can check if data are correctly standardized:
+
+```{r}
+# compute the mean on columns -> they should be approximately equal to 0
+apply(std.covariates,2,mean)
+
+# compute the sd on columns -> they should be 1
+apply(std.covariates,2,sd)
+```
+We tried different distances to choose than the best one.
+```{r}
+L2.EUdist = dist(std.covariates, method='euclidean')
+
+pc = prcomp(std.covariates)  
+std.scores = pc$x / matrix(pc$sdev,nrow=dim(std.covariates)[1],ncol=dim(std.covariates)[2],byrow=TRUE)
+
+L2.mahalanobis = dist(std.scores)
+
+L2.manhattan = dist(std.covariates, method='minkowski', p=1)
+```
+
+We employ the Ward linkage method for this clustering. This is a method used in hierarchical clustering to determine the distance between two clusters before merging them. The goal of Ward linkage is to minimize the increase in variance within the newly formed cluster when two clusters are combined.
+
+```{r}
+hclust.ward = hclust(L2.EUdist,method='ward.D2')
+plot(hclust.ward) 
+
+hclust.mahalanobis = hclust(L2.mahalanobis,method='ward.D2')
+plot(hclust.mahalanobis) 
+
+hclust.manhattan = hclust(L2.manhattan,method='ward.D2')
+plot(hclust.manhattan)
+```
+
+We tried other linkage methods, but they all performed poorly. That's why we opted for Ward. Among the different distances, the dendrogram with Manhattan distance seems the most promising, suggesting between 2 to 4 clusters.
+
+We cut the dendrogram at k=4 cluster:
+
+```{r}
+clusters4 = cutree(hclust.manhattan,k=4)
+table(factor(clusters4)) # Quantity of units per cluster
+```
+
+```{r}
+clusters4
+```
+
+```{r}
+cluster_df <- data.frame(cluster = clusters4)
+covariates_clusters <- cbind(cluster_df, covariates)
+head(covariates_clusters)
+```
+
+```{r}
+cluster_means <- aggregate(. ~ cluster, data = covariates_clusters, FUN = mean)
+print(cluster_means)
+```
+
+```{r}
+cluster_counts <- table(covariates_clusters$cluster, heart$death)
+cluster_counts
+```
+
+```{r}
+cluster_counts <- matrix(c(66, 70, 11, 7, 30, 8, 96, 11), nrow = 4, byrow = TRUE)
+rownames(cluster_counts) <- paste("Cluster", 1:4)
+colnames(cluster_counts) <- c("Survived", "Dead")
+
+colors <- c("blue", "red")
+
+barplot(t(cluster_counts), beside = TRUE, col = colors, 
+        main = "Frequency of deaths and survivals per cluster", 
+        xlab = "Cluster", ylab = "Frequenza",
+        legend.text=TRUE, 
+        args.legend = list(x = "topright", bty = "n", inset = c(0.5,0.2)))
+```
+*Cluster 1*: most crowded, patient with higher average age (64 years old), highest values of platelets but also they have the shorter period of follow-up in the hospital.
+More than 50% of the cluster died.
+
+*Cluster 2*: less crowded cluster and the youngest patients. Characterized by the highest values of creatinine phosphokinase (that may indicates that a muscle tissue gets damaged because in that case CPK flows into the blood. Therefore, high levels of CPK in the blood of a patient might indicate a heart failure or injury) but also the lowest value of serum_creatinine (If a patient has high levels of serum creatinine, it may indicate renal dysfunction so this cluster appear to be healthy from this point of view). Also serum_sodium is the highest among the cluster (An abnormally low level of sodium in the blood might be caused by heart failure).
+
+*Cluster 3*: The cluster is characterized by the highest average value of injection fraction. This parameter states the percentage of how much blood the left ventricle pumps out with each contraction, and high level denotes a good state of health. On the other side, it has also has in average the highest value of serum creatinine, which a waste product generated by creatinine, which may it indicate renal dysfunction.
+
+
+*Cluster 4*: higest time of follow-up in hospital anche large number of survived patients, also with a quite high value oof injection fraction.
+
+
+```{r}
+library(GGally)
+ggpairs(heart, aes(colour = factor(clusters4), alpha = 0.4))
+```
+It is visible from the plot the difference between the four clusters through all the different covariates to a have a visual investigation.
+
+### EM algorithm
+
+```{r}
+em = Mclust(std.covariates)
+summary(em)
+em$G # number of cluster suggested
+```
+
+The Mclust analysis suggests a model with 7 components. The clustering table indicates the distribution of data points across these components. The log-likelihood, BIC, and ICL values provide insights into the model fit and complexity, with lower values indicating better fit and model parsimony.
+
+EM results suggest 7 clusters but we prefer to use a hierarchical clustering that suggests 4 clusters. We took this decision beacuse it is very difficult to interpret 7 clusters and moreover EM seems not to work really good because our covariates could not be normal distributed.
+
+We did not perform K-means because variance-covariance matrices of our covariates seem not to be spherical.
+
+
+## Variable selection
+
+We used Lasso to perform variable selection and understand with are the most significant variables that influence the death of patients after a heart failure.
+
+### Lasso
+
+```{r}
+X = model.matrix(glm(death ~ ., family = "binomial", data=heart))[,-1]
+p = dim(X)[2] - 1 # model matrix includes the intercept
+y = heart$death
+lambda.grid = 10^seq(5,-6, length =100)
+```
+
+```{r}
+cv.heart = cv.glmnet(X,heart1$death,alpha=1,lambda= lambda.grid)
+plot(cv.heart)
+```
+
+```{r}
+bestlam = cv.heart$lambda.min
+bestlam
+se1lam = cv.heart$lambda.1se
+se1lam
+```
+
+```{r}
+log(bestlam)
+log(se1lam)
+```
+
+
+```{r}
+lasso.mod = glmnet(X,heart$death,alpha=1, lambda=lambda.grid, family="binomial") 
+
+std.coeff = lasso.mod$beta * matrix(apply(X,2,sd),nrow=12,ncol=length(lambda.grid),byrow=FALSE)
+
+matplot(lasso.mod$lambda,t(std.coeff),type='l',lty=1,lwd=2,col=rainbow(p),log='x',xlab='Lambda',ylab='Standradized coefficients',main='Lasso')
+legend( 'topright',rownames(std.coeff),col=rainbow(p),lty=1,lwd=2,cex=.6)
+abline(v=bestlam, lty=1,col='orange',lwd=3)
+abline(v=se1lam, lty=1,col='orange',lwd=3)
+```
+
+```{r}
+coef.lasso1 <- predict(cv.heart,type="coefficients",s=bestlam)
+coef.lasso2 <- predict(cv.heart,type="coefficients",s=se1lam)
+coef.ls = coef(glm(death ~ ., family= "binomial", data = heart))
+
+cbind(coef.lasso1,coef.lasso2,coef.ls)
+```
+The output shows the coefficient estimates for three different models:
+
+1.  LASSO with best lambda: The first column contains the coefficient estimates obtained using the LASSO model with the best lambda value, which is determined by cross-validation. The lambda value is selected to minimize the cross-validated error.
+
+2.  LASSO with lambda1se: This column contains the coefficient estimates obtained using the LASSO model with the lambda value that is largest value of $\lambda$ such that error is within 1 standard error of the cross-validated errors for $lambda.min$ .
+
+3.  $coef.ls$ : This column contains the coefficient estimates obtained from a simple linear regression model without any regularization. These coefficients represent the linear relationship between each predictor variable and the response variable.
+
+Each row in the output corresponds to a predictor variable, along with its coefficient estimates for the three models.
+
+It's important to note that some coefficients may appear as ".". This indicates that the corresponding predictor variable was not selected by the LASSO models and therefore has a coefficient estimate of zero.
+
+To sum up, the first configuration with the parameter "bestlam" suggests 7 variables that are: $age, creatinine\ phosphokinase, ejection\ fraction, serum\ creatinine, serum\ sodium, sex, time$
+
+whereas the second configuration with the parameter "se1lam" suggests only 4 variables to keep: $age, ejection\ fraction, serum\ creatinine, time$
+
+
+## Create the dataset with the significant covariates
+
+We have selected the four variables suggested by Lasso:
+$time, ejection fraction, serum creatinine, age$.
+```{r}
+heart2 <- heart[,c(1,5,8,12,13)]
+```
+
+This decision was made in order to investigate only the most important predictors that can influence the death of the patients and avoiding the non significant ones. Ad it is possible to denote we used only numeric variables because the categorical ones seemed not to be that significant for our goal.
+
+## Classification methods
+
+We are working with a binary response variable, $death$, which requires the application of classification methods to predict the death or the survival of the patient of San Raffaele.
+Our initial step involves partitioning the dataset into training and testing subsets, with 70% of the data allocated for training and 30% for testing the accuracy, the specificity and the sensitivity of our models.
+
+```{r}
+n = dim(heart2)[1]
+set.seed(40026)
+select.train = sample(1:n,n*7/10)
+train = heart2[select.train,]
+test = heart2[-select.train,]
+```
+
+I do the same thing for the dataset with all the covariates. In fact, for some methods like the ensamble tree methods we want to compare the results of the methods with all the predictors with the ones with only the selected covariates.
+
+```{r}
+n = dim(heart)[1]
+set.seed(40026)
+select.train = sample(1:n,n*7/10)
+train1 = heart[select.train,]
+test1 = heart[-select.train,]
+```
+
+### Logistic regression
+
+We utilize logistic regression, assuming a linear effect of predictors on our response variable:
+
+```{r}
+logit <- glm(death ~.,data=train,family='binomial')
+summary(logit) #estimates and p-values parameters
+
+#predict on new data (test set):
+yhat.logit <- predict(logit,newdata=test,type='response')
+
+#classify predictions: p > 0.5 assigned to class 1, otherwise to class 0:
+prediction.logit <- factor(ifelse(yhat.logit>0.5,'1','0'),levels=c('0','1'))
+```
+
+Notice that the estimated coefficients for each predictor variable suggest their impact on the log odds of the response variable (\$death). For instance, a positive coefficient indicates a positive association between the predictor and the log odds of death, while a negative coefficient suggests a negative association.
+
+Sensitivity: true positive rate, proportion of true positive over the positives.
+Specifivity: true negative rate, proportion of negative positive over the negatives.
+
+```{r}
+library(caret)
+confusionMatrix(data = prediction.logit, reference =test$death)
+```
+
+We consider the sensitivity, which is 0.8413, and the specificity, 0.7407.
+
+```{r}
+# ROC curve
+rocplot <- function(pred, truth, ...){
+  predob <- prediction(pred, truth)
+  perf <- performance(predob , "tpr", "fpr") 
+  plot(perf ,...)
+  auc <- performance(predob , "auc")
+  return(attributes(auc)$y.values)
+}
+```
+
+```{r}
+auc.logit <- rocplot(pred=yhat.logit,truth=test$death,lwd=2,colorize=TRUE)
+text(0.85,0.1,paste0('AUC=',round(auc.logit[[1]],4)),font=2)
+```
+
+AUC explains how well the method performs.
+
+### GAM
+
+```{r}
+gam_model <- gam(death ~ s(age,3) + s(ejection_fraction,3) + s(serum_creatinine,3) + s(time,3), data = train, family = binomial)
+summary(gam_model)
+```
+
+```{r}
+layout(matrix(1:4,nrow=2,byrow=TRUE))
+plot(gam_model,se=TRUE , col ="red",lwd=2)
+```
+
+```{r}
+predictions <- predict(gam_model, newdata = test)
+predicted_classes <- factor(ifelse(predictions > 0.5, 1, 0))
+```
+
+```{r}
+confusionMatrix(data = predicted_classes, reference = test$death)
+```
+
+### Improving GAM
+
+According to the summary of the GAM, specifically from the Anova for Nonparametric Effects that we previously implemented, we have decided to introduce linearly the variable $age$ in the model in order improve the GAM.
+
+```{r}
+gam_model1 <- gam(death ~ age + s(ejection_fraction,3) + s(serum_creatinine,3) + s(time,3), data = train, family = binomial)
+
+summary(gam_model1)
+```
+
+```{r}
+predictions1 <- predict(gam_model1, newdata = test)
+predicted_classes1 <- factor(ifelse(predictions1 > 0.5, 1, 0))
+```
+
+```{r}
+confusionMatrix(data = predicted_classes1, reference = test$death)
+```
+
+
+### Classification trees
+
+For classification tree we decided to use all the covariates and then prune the whole tree, in order to understand the branches divisions suggested and which are the most influencial variables.
+
+```{r}
+tree <- tree(death ~., data=train1,split='gini')
+plot(tree,lwd=2,col='darkgray')
+text(tree,pretty=0,cex=0.5,digits=4,font=2,col='blue')
+```
+
+```{r}
+set.seed(40026)
+# We must cut based on CV to understand the best size
+help(cv.tree)
+cv.result <- cv.tree(tree, FUN=prune.misclass) 
+# The prune.missclass function seems to be used to evaluate which would be the best pruning 
+# configuration to minimize missclassification error.
+
+layout(cbind(1,2))
+plot(cv.result$size,cv.result$dev,type='b',pch=16,xlab='Size',ylab='CV error')
+abline(v=5)
+```
+
+```{r}
+prune.result <- prune.misclass(tree,best = 5)
+prune.result
+```
+
+```{r}
+# BEST TREE PLOTTED
+#layout(1)
+plot(prune.result,lwd=2,col='darkgray')
+text(prune.result,pretty=0,cex=0.6,digits=4,font=2,col='blue')
+```
+
+```{r}
+yhat.tree <- predict(prune.result,newdata=test1)
+head(yhat.tree) #probabilities to belong to each class
+prediction.tree <- factor(ifelse(yhat.tree[,1]>0.5,'0','1'),levels = c('0','1')) #if first colomn of yhat.tree >0.5 classified as low
+```
+
+
+```{r}
+confusionMatrix(data = prediction.tree, reference = test1$death)
+```
+
+```{r}
+auc.tree <- rocplot(pred=1-yhat.tree[,1],truth=test1$death,lwd=2,colorize=TRUE)
+text(0.8,0.2,paste0('AUC=',round(auc.tree[[1]],4)),font=2)
+```
+
+### Support vector machine
+
+```{r}
+library(e1071)
+set.seed(40026)
+tune.out <- tune(svm,death~.,data=train,kernel="radial",
+                 ranges=list(cost=c(0.01, 0.1, 1,5,10),gamma=c(1,2,3)))
+summary(tune.out)
+```
+
+
+```{r}
+bestmod.SVM <- tune.out$best.model
+summary(bestmod.SVM)
+```
+
+
+```{r}
+prediction.SVM <- predict(bestmod.SVM,newdata=test)
+```
+
+```{r}
+confusionMatrix(data = prediction.SVM, reference = test$death)
+```
+
+
+## Trees ensamble methods
+
+For trees ensamble methods we decided to compare the results of the techniques with the whole set of predictors with the one with only the covariates selected with Lasso.
+
+### Gradient Boosting (with all the covariates)
+```{r}
+set.seed(40026)
+train2 <- heart1[select.train,]
+test2 <- heart1[-select.train,]
+```
+
+```{r}
+set.seed(40026)
+boost.heart.full <- gbm(death ~ ., data = train2, distribution = "bernoulli", n.trees = 200, interaction.depth = 4)
+summary(boost.heart.full)
+```
+
+```{r}
+# Based on the relative influence obtained above, we can plot the marginal effects of the most influential variables using partial dependence plots.
+par(mfrow = c(1,4))
+plot(boost.heart.full, i = "time")
+plot(boost.heart.full, i = "serum_creatinine")
+plot(boost.heart.full, i = "ejection_fraction")
+plot(boost.heart.full, i = "creatinine_phosphokinase")
+```
+
+```{r}
+# We the use predict() to see how the model performs on the test data. this gives probabilities as output
+yhat.boost.full <- predict(boost.heart.full, newdata = test2, n.trees = 200,type = "response")
+
+prediction.boost.full <- factor(ifelse(yhat.boost.full>0.5,1,0))
+```
+
+
+```{r}
+confusionMatrix(data = prediction.boost.full, reference = test$death)
+```
+
+
+```{r}
+auc.boost.full <- rocplot(pred=yhat.boost.full,truth=test2$death,lwd=2,colorize=TRUE)
+text(0.8,0.2,paste0('AUC=',round(auc.boost.full[[1]],4)),font=2)
+```
+
+
+### Gradient Boosting (with the selected covariates)
+```{r}
+y_dummy <- as.numeric(heart2$death=='1')
+data2 <- heart2
+data2$death <- y_dummy
+set.seed(40026)
+train3 <- data2[select.train,]
+test3 <- data2[-select.train,]
+```
+
+```{r}
+set.seed(40026)
+boost.heart <- gbm(death ~ ., data = train3, distribution = "bernoulli", n.trees = 200, interaction.depth = 4)
+summary(boost.heart)
+```
+
+```{r}
+# Based on the relative influence obtained above, we can plot the marginal effects of the most influential variables using partial dependence plots.
+par(mfrow = c(1,4))
+plot(boost.heart, i = "time")
+plot(boost.heart, i = "serum_creatinine")
+plot(boost.heart, i = "age")
+plot(boost.heart, i = "ejection_fraction")
+```
+
+```{r}
+# We the use predict() to see how the model performs on the test data. this gives probabilities as output
+yhat.boost <- predict(boost.heart, newdata = test3, n.trees = 200,type = "response")
+
+prediction.boost <- factor(ifelse(yhat.boost>0.5,1,0))
+```
+
+```{r}
+confusionMatrix(data = prediction.boost, reference = test$death)
+```
+
+After trying different values of the parameters $n.trees$ and $interaction.depth$, we conclude that the best parameters values are 200 and 4.
+
+```{r}
+auc.boost <- rocplot(pred=yhat.boost,truth=test3$death,lwd=2,colorize=TRUE)
+text(0.8,0.2,paste0('AUC=',round(auc.boost[[1]],4)),font=2)
+```
+
+### Bagging (with all the covariates)
+
+```{r}
+set.seed(40026)
+bagging.full <- randomForest(death ~ . , data = train1, mtry=12,ntree=400) 
+prediction.bagging.full <- predict(bagging.full,test1) 
+```
+
+```{r}
+confusionMatrix(data = prediction.bagging.full, reference = test$death)
+```
+
+### Bagging (with only the selected covariates)
+
+```{r}
+set.seed(40026)
+bagging <- randomForest(death ~ . , data = train, mtry=4,ntree=400) 
+prediction.bagging <- predict(bagging,test) 
+```
+
+```{r}
+confusionMatrix(data = prediction.bagging, reference = test$death)
+```
+
+
+### Random Forest (with all the covariates)
+
+```{r}
+p.full <- dim(heart)[2] - 1
+oob.err.full<-double(p)
+
+n.train.full <- dim(train)[1]
+set.seed(40026)
+subtrain.index.full <- sample(1:n.train.full,round(n.train.full/3*2))
+
+#mtry is the number of variables randomly chosen at each split
+for(mtry in 1:p.full) {
+  rf <- randomForest(death ~ . , data = train1, subset = subtrain.index.full,mtry=mtry,ntree=400) 
+  oob.err.full[mtry] <- rf$err.rate[400,1] #OOB Error of all Trees fitted
+  
+  cat(mtry," ")
+}
+
+# OOB to choose the best mtry
+matplot(1:mtry , cbind(oob.err.full), pch=19 , col="red", type="b", 
+        ylab="Misclassification Error Rate", xlab="Number of Predictors Considered at each Split")
+legend("topright",legend="Out of Bag Error",pch=19, col="red")
+```
+
+We select mtry = 2 looking at the OOB error. All the values seem to be very close, and mtry=1, which means that only one variables is randomly sampled as candidates at each split, we did not considered appropriate.
+
+```{r}
+set.seed(40026)
+rf.full <- randomForest(death ~ . , data = train1 , mtry=2,ntree=400) 
+prediction.RF.full <- predict(rf.full,test1) 
+```
+
+```{r}
+confusionMatrix(data = prediction.RF.full, reference = test$death)
+```
+
+
+```{r}
+importance(rf.full)
+varImpPlot(rf.full) #plot of importance
+```
+
+```{r}
+yhat.RF.full <- predict(rf.full,test1,type='prob')[,1]
+auc.RF.full <- rocplot(pred=1-yhat.RF.full,truth=test1$death,lwd=2,colorize=TRUE)
+text(0.8,0.2,paste0('AUC=',round(auc.RF.full[[1]],4)),font=2)
+```
+
+
+### Random Forest (with only the selected covariates)
+
+```{r}
+p <- dim(heart2)[2] - 1
+oob.err<-double(p)
+test.err<-double(p)
+
+
+n.train <- dim(train)[1]
+set.seed(40026)
+subtrain.index <- sample(1:n.train,round(n.train/3*2))
+
+#mtry is the number of variables randomly chosen at each split
+for(mtry in 1:p) {
+  rf <- randomForest(death ~ . , data = train, subset = subtrain.index,mtry=mtry,ntree=400) 
+  oob.err[mtry] <- rf$err.rate[400,1] #OOB Error of all Trees fitted
+  
+  cat(mtry," ")
+}
+
+# OOB to choose the best mtry
+matplot(1:mtry , cbind(oob.err), pch=19 , col="red", type="b", 
+        ylab="Misclassification Error Rate", xlab="Number of Predictors Considered at each Split")
+legend("topright",legend="Out of Bag Error",pch=19, col="red")
+```
+
+We select mtry = 2 looking at the OOB error. All the values seem to be very close, and mtry=1, which means that only one variables is randomly sampled as candidates at each split, we did not considered appropriate.
+
+```{r}
+set.seed(40026)
+rf <- randomForest(death ~ . , data = train , mtry=1,ntree=400) 
+prediction.RF <- predict(rf,test) 
+```
+
+```{r}
+confusionMatrix(data = prediction.RF, reference = test$death)
+```
+
+
+```{r}
+importance(rf)
+varImpPlot(rf) #plot of importance
+```
+The numerical values indicate how much each variable contributes to the decrease in the Gini impurity measure in the model. Higher values suggest that the variable is more important for class separation in the model.
+
+For example, $time$ has a value of 41.37, indicating it is a highly important variable in the model. This suggests that "time" has a strong impact on the model's ability to make accurate predictions. Similarly, $serum_creatinine$ has a value of 21.59, indicating significant importance in the model.
+
+```{r}
+yhat.RF <- predict(rf,test,type='prob')[,1]
+auc.RF <- rocplot(pred=1-yhat.RF,truth=test$death,lwd=2,colorize=TRUE)
+text(0.8,0.2,paste0('AUC=',round(auc.RF[[1]],4)),font=2)
+```
+
+
+## Final considerations
+
+The most influential variables to explain the death or the survival are the time of follow up in the hospital, ejection fraction (the percentage of how much blood the left ventricle pumps out with each contraction), the serum creatinine (a waste product generated by creatine, when a muscle breaks down) and the age of the patients.
+
+The time of follow-up period however it is not a physical/clinical factor and may depends on various factors regarding the hospital, so we should focus on the other features.
+
+All the classification methods have very similar metrics values. This means that they are quite good at predicting the death or survival of the patients based on the features. Some of them works better in terms of accuracy, others in terms of specificity and sensitivity.
+
+We chose the best models that have a good balance between all the metrics. 
+
+When looking at complexity, metrics, and interpretability, Random Forest might be a better fit for this task.
